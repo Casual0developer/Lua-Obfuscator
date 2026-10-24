@@ -34,10 +34,16 @@
       <div class="settings-heading"><span class="eyebrow">Configuration</span><h2>Output settings</h2></div>
       <section class="config-section"><h3 class="section-label">Language &amp; identifiers</h3><label class="field-label" for="version">Lua version</label><div class="select-wrap"><select id="version"><option value="Luau" selected>Luau / Roblox</option><option value="5.1">Lua 5.1</option><option value="5.2">Lua 5.2</option><option value="5.3">Lua 5.3</option><option value="LuaJIT">LuaJIT</option></select></div><label class="toggle-row" for="rename"><span class="toggle-text"><strong>Scramble local names</strong><small>Rename declarations and their references.</small></span><span class="switch-control"><input id="rename" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label></section>
       <section class="config-section"><h3 class="section-label">Encoding</h3><label class="toggle-row" for="strings"><span class="toggle-text"><strong>Encode strings &amp; keys</strong><small>Pool and encode text constants.</small></span><span class="switch-control"><input id="strings" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label><div class="range-control" id="layers-control"><div class="range-header"><label for="layers">Encoding layers</label><output id="layers-value" for="layers">3 layers</output></div><input class="range-slider" id="layers" type="range" min="1" max="4" step="1" value="3" aria-describedby="layers-help"><div class="range-scale" aria-hidden="true"><span>Fast</span><span>Layered</span></div><p class="control-note" id="layers-help">Decoded once. More layers add startup work.</p></div></section>
-      <section class="config-section"><h3 class="section-label">Code layout</h3><label class="toggle-row" for="oneline"><span class="toggle-text"><strong>Single-line code body</strong><small>Keep watermark comments on header lines.</small></span><span class="switch-control"><input id="oneline" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label><label class="toggle-row" for="junk"><span class="toggle-text"><strong>Add junk blocks</strong><small>Isolated calculations before the script.</small></span><span class="switch-control"><input id="junk" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label><div class="range-control" id="junk-count-control"><div class="range-header"><label for="junk-count">Junk blocks</label><output id="junk-count-value" for="junk-count">3 blocks</output></div><input class="range-slider" id="junk-count" type="range" min="0" max="12" step="1" value="3" aria-describedby="junk-count-help"><div class="range-scale" aria-hidden="true"><span>None</span><span>12 blocks</span></div><p class="control-note" id="junk-count-help">Extra blocks increase output size.</p></div></section>
+      <section class="config-section"><h3 class="section-label">Code layout</h3>
+        <label class="toggle-row" for="oneline"><span class="toggle-text"><strong>Single-line code body</strong><small>Keep watermark comments on header lines.</small></span><span class="switch-control"><input id="oneline" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label>
+        <label class="toggle-row" for="junk"><span class="toggle-text"><strong>Add junk blocks</strong><small>Isolated calculations before the script.</small></span><span class="switch-control"><input id="junk" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label>
+        <div class="range-control" id="junk-count-control"><div class="range-header"><label for="junk-count">Junk blocks</label><output id="junk-count-value" for="junk-count">32 blocks</output></div><input class="range-slider" id="junk-count" type="range" min="0" max="128" step="1" value="32" aria-describedby="junk-count-help"><div class="range-scale" aria-hidden="true"><span>None</span><span>128 blocks</span></div><p class="control-note" id="junk-count-help">Extra blocks increase output size.</p></div>
+        <div class="range-control" id="symbol-padding-control"><div class="range-header"><label for="symbol-padding">Symbol padding</label><output id="symbol-padding-value" for="symbol-padding">512 KB</output></div><input class="range-slider" id="symbol-padding" type="range" min="0" max="2048" step="64" value="512" aria-describedby="symbol-padding-help"><div class="range-scale" aria-hidden="true"><span>None</span><span>2 MB</span></div><p class="control-note" id="symbol-padding-help">Adds random symbols in a safe comment. Visual bulk, without extra runtime work.</p></div>
+      </section>
       <section class="config-section"><h3 class="section-label">Editor</h3><div class="range-control" id="font-size-control"><div class="range-header"><label for="font-size">Font size</label><output id="font-size-value" for="font-size">14 px</output></div><input class="range-slider" id="font-size" type="range" min="12" max="18" step="1" value="14" aria-describedby="font-size-help"><div class="range-scale" aria-hidden="true"><span>12 px</span><span>18 px</span></div><p class="control-note" id="font-size-help">Adjust the source editor text.</p></div></section>
-      <section class="config-section"><h3 class="section-label">Watermarks</h3><label class="toggle-row" for="watermarks"><span class="toggle-text"><strong>Include supplied watermarks</strong><small>Use only your two exact comments.</small></span><span class="switch-control"><input id="watermarks" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label><details><summary>View watermark text</summary><pre class="watermark-preview">-- This script was generated using MoonVeil 2.1.1 [https://moonveil.cc]
---[[ v1.0.0 https://wearedevs.net/obfuscator ]]</pre></details></section>
+      <section class="config-section"><h3 class="section-label">Watermarks</h3><label class="toggle-row" for="watermarks"><span class="toggle-text"><strong>Include supplied watermarks</strong><small>Use only your three supplied comments.</small></span><span class="switch-control"><input id="watermarks" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label><details><summary>View watermark text</summary><pre class="watermark-preview">-- This script was generated using MoonVeil 2.1.1 [https://moonveil.cc]
+--[[ v1.0.0 https://wearedevs.net/obfuscator ]]
+--[[ obfuscated @ discord.gg/25ms ]]</pre></details></section>
       <div class="actions-area"><button class="action" id="run" type="button"><span id="run-label">Obfuscate script</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg></button><button class="cancel" id="cancel" type="button" hidden>Cancel processing</button><p class="status" id="status" role="status" aria-live="polite"></p><div class="error" id="error" role="alert"></div><p class="hint">Processed locally · Input up to 1 MB<br>Read the <a href="help.html">guide &amp; compatibility notes</a>.</p></div>
     </aside>
   </main>
@@ -278,16 +284,18 @@ function obfuscateLua(source, supplied = {}) {
   const MAX_INPUT = 1024 * 1024, MAX_OUTPUT = 8 * 1024 * 1024;
   if (source.length > MAX_INPUT || new TextEncoder().encode(source).length > MAX_INPUT)
     throw new Error('The input is too large. Open a Lua file smaller than 1 MB.');
-  const options = {version:'Luau',rename:true,strings:true,oneline:true,junk:true,junkCount:3,watermarks:true,layers:3,...supplied};
+  const options = {version:'Luau',rename:true,strings:true,oneline:true,junk:true,junkCount:32,paddingKB:512,watermarks:true,layers:3,...supplied};
   if (!['Luau','5.1','5.2','5.3','LuaJIT'].includes(options.version)) throw new Error('Choose a supported Lua version.');
   if (!Number.isInteger(options.layers)||options.layers<1||options.layers>4)throw new Error('Choose between one and four encoding layers.');
-  if(!Number.isInteger(options.junkCount)||options.junkCount<0||options.junkCount>12)throw new Error('Choose between zero and twelve junk blocks.');
+  if(!Number.isInteger(options.junkCount)||options.junkCount<0||options.junkCount>128)throw new Error('Choose between zero and 128 junk blocks.');
+  if(!Number.isInteger(options.paddingKB)||options.paddingKB<0||options.paddingKB>2048)throw new Error('Choose between zero and 2048 KB of symbol padding.');
   if (options.oneline && !options.strings) throw new Error('Enable string encoding before using a single-line body.');
   const isLuau = options.version === 'Luau';
   const version = isLuau ? 'LuaJIT' : options.version;
   const WATERMARKS = [
     '-- This script was generated using MoonVeil 2.1.1 [https://moonveil.cc]',
-    '--[[ v1.0.0 https://wearedevs.net/obfuscator ]]'
+    '--[[ v1.0.0 https://wearedevs.net/obfuscator ]]',
+    '--[[ obfuscated @ discord.gg/25ms ]]'
   ];
   const compatibleView = code => {
     if (!isLuau) return {code, compounds:[]};
@@ -353,13 +361,17 @@ function obfuscateLua(source, supplied = {}) {
   const decoder=options.strings?fresh():null, poolName=options.strings?fresh():null;
   const byteFn=options.strings?fresh():null, charFn=options.strings?fresh():null, joinFn=options.strings?fresh():null;
   const pool=[], poolIndex=new Map();
-  const alphabetChars=Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/');
-  const alphabetRandom=crypto.getRandomValues(new Uint32Array(64));
-  for(let i=63;i>0;i--){const at=alphabetRandom[i]%(i+1);[alphabetChars[i],alphabetChars[at]]=[alphabetChars[at],alphabetChars[i]];}
-  const alphabet=alphabetChars.join('');
+  function luaLiteral(text){
+    let equals='';
+    for(;;){const close=']'+equals+']';if((text+close).indexOf(close)===text.length)return '['+equals+'['+text+close;equals+='=';}
+  }
+  const alphabetChars=Array.from({length:94},(_,index)=>String.fromCharCode(33+index));
+  const alphabetRandom=crypto.getRandomValues(new Uint32Array(94));
+  for(let i=93;i>0;i--){const at=alphabetRandom[i]%(i+1);[alphabetChars[i],alphabetChars[at]]=[alphabetChars[at],alphabetChars[i]];}
+  const alphabet=alphabetChars.slice(0,64).join('');
   const pack=bytes=>{
     const parts=[];
-    for(let i=0;i<bytes.length;i+=3){const a=bytes[i],b=bytes[i+1],c=bytes[i+2];parts.push(alphabet[a>>>2],alphabet[((a&3)<<4)|((b||0)>>>4)],b===undefined?'=':alphabet[((b&15)<<2)|((c||0)>>>6)],c===undefined?'=':alphabet[c&63]);}
+    for(let i=0;i<bytes.length;i+=3){const a=bytes[i],b=bytes[i+1],c=bytes[i+2];parts.push(alphabet[a>>>2],alphabet[((a&3)<<4)|((b||0)>>>4)],b===undefined?'':alphabet[((b&15)<<2)|((c||0)>>>6)],c===undefined?'':alphabet[c&63]);}
     return parts.join('');
   };
   const toBytes=text=>Array.from(new TextEncoder().encode(text));
@@ -404,7 +416,7 @@ function obfuscateLua(source, supplied = {}) {
         if(reverse)next.reverse();transformed=next;
       }
       const record=metadata.concat(transformed);
-      pool.push(`${decoder}("${pack(record)}")`);index=pool.length;poolIndex.set(signature,index);
+      pool.push(`${decoder}(${luaLiteral(pack(record))})`);index=pool.length;poolIndex.set(signature,index);
     }
     return `${poolName}[${index}]`;
   };
@@ -491,24 +503,30 @@ function obfuscateLua(source, supplied = {}) {
   const newIndex=[];shuffled.forEach((item,index)=>{newIndex[item.oldIndex]=index+1;});
   if(pool.length){
     output=output.replace(new RegExp(poolName+'\\[(\\d+)\\]','g'),(_,index)=>`${poolName}[${newIndex[Number(index)]}]`);
-    const initializer=`(function(${byteFn},${charFn},${joinFn})local map={}local alphabet="${alphabet}" for i=1,64 do map[${byteFn}(alphabet,i)]=i-1 end local function ${decoder}(s)local v={}for i=1,#s,4 do local a,b,c,d=${byteFn}(s,i,i+3) a=map[a] b=map[b] c=map[c] d=map[d] v[#v+1]=a*4+(b-b%16)/16 if c then v[#v+1]=(b%16)*16+(c-c%4)/4 end if d then v[#v+1]=(c%4)*64+d end end local count=v[1] local offset=1+count*5 local n=#v-offset for layer=count,1,-1 do local at=2+(layer-1)*5 local inv,key,step,previous,rev=v[at],v[at+1],v[at+2],v[at+3],v[at+4] if rev==1 then for i=1,(n-n%2)/2 do v[offset+i],v[offset+n-i+1]=v[offset+n-i+1],v[offset+i] end end for i=1,n do local e=v[offset+i] v[offset+i]=(e*inv-key-i*step-previous)%256 previous=e end end local o={}for i=1,n do o[i]=${charFn}(v[offset+i])end return ${joinFn}(o)end return {${shuffled.map(item=>item.entry).join(',')}}end)(string.byte,string.char,table.concat)`;
+    const initializer=`(function(${byteFn},${charFn},${joinFn})local map={}local alphabet=${luaLiteral(alphabet)} for i=1,64 do map[${byteFn}(alphabet,i)]=i-1 end local function ${decoder}(s)local v={}for i=1,#s,4 do local a,b,c,d=${byteFn}(s,i,i+3) a=map[a] b=map[b] c=map[c] d=map[d] v[#v+1]=a*4+(b-b%16)/16 if c then v[#v+1]=(b%16)*16+(c-c%4)/4 end if d then v[#v+1]=(c%4)*64+d end end local count=v[1] local offset=1+count*5 local n=#v-offset for layer=count,1,-1 do local at=2+(layer-1)*5 local inv,key,step,previous,rev=v[at],v[at+1],v[at+2],v[at+3],v[at+4] if rev==1 then for i=1,(n-n%2)/2 do v[offset+i],v[offset+n-i+1]=v[offset+n-i+1],v[offset+i] end end for i=1,n do local e=v[offset+i] v[offset+i]=(e*inv-key-i*step-previous)%256 previous=e end end local o={}for i=1,n do o[i]=${charFn}(v[offset+i])end return ${joinFn}(o)end return {${shuffled.map(item=>item.entry).join(',')}}end)(string.byte,string.char,table.concat)`;
     output=`local ${poolName}=${initializer}\n`+output;
   }
   let junk=0;
   if(options.junk&&options.junkCount){const blocks=[];for(let i=0;i<options.junkCount;i++){const name=fresh(),value=100+crypto.getRandomValues(new Uint16Array(1))[0]%900;blocks.push(`do local ${name}=${value};${name}=${name}+1 end`);junk++;}output=blocks.join('\n')+'\n'+output;}
   if(options.oneline)output=output.replace(/\s+/g,' ').trim();
+  const paddingBytes=options.paddingKB*1024;
+  if(paddingBytes){
+    const parts=[];
+    for(let at=0;at<paddingBytes;at+=16384){const random=crypto.getRandomValues(new Uint8Array(Math.min(16384,paddingBytes-at))),chars=new Array(random.length);for(let i=0;i<random.length;i++)chars[i]=String.fromCharCode(32+random[i]%95);parts.push(chars.join(''));}
+    output='--'+luaLiteral(parts.join(''))+' '+output;
+  }
   const headers=[];
   if(shebang&&!options.oneline)headers.push(shebang);
   if(options.watermarks)headers.push(...WATERMARKS);
   if(headers.length)output=headers.join('\n')+'\n'+output;
   if(output.length>MAX_OUTPUT)throw new Error('The generated output exceeds the 8 MB limit.');
   try{checkCompilerLimits(parse(output),options.version);}catch(error){throw new Error('Output validation failed: '+error.message);}
-  return {code:output,renamed,junk,encoded,uniqueStrings:pool.length,layers:pool.length?options.layers:0,watermarks:options.watermarks?2:0};
+  return {code:output,renamed,junk,encoded,uniqueStrings:pool.length,layers:pool.length?options.layers:0,paddingBytes,watermarks:options.watermarks?WATERMARKS.length:0};
 }
 
 const $=id=>document.getElementById(id);
 const sourceBox=$('source'), errorBox=$('error'), statusBox=$('status');
-const settingIds=['version','layers','junk-count','font-size','rename','strings','oneline','junk','watermarks'];
+const settingIds=['version','layers','junk-count','symbol-padding','font-size','rename','strings','oneline','junk','watermarks'];
 const maxInput=1024*1024;
 let activeWorker=null, activeTimer=null, activeURL=null, draftTimer=null, sourceLineCount=1, fileName='Untitled.lua';
 const setFileName=name=>{fileName=typeof name==='string'&&name?name.slice(0,255):'Untitled.lua';$('file-name').textContent=fileName;$('file-name').title=fileName;};
@@ -522,17 +540,18 @@ const renderGutter=()=>{
 };
 const setCursor=()=>{const position=sourceBox.selectionStart||0,before=sourceBox.value.slice(0,position);$('cursor-stat').textContent='Ln '+(before.split('\n').length).toLocaleString()+', Col '+(position-before.lastIndexOf('\n')).toLocaleString();};
 const setStat=()=>{sourceLineCount=sourceBox.value.split('\n').length;$('input-stat').textContent=sourceLineCount.toLocaleString()+(sourceLineCount===1?' line':' lines')+' · '+sourceBox.value.length.toLocaleString()+' characters';setCursor();renderGutter();};
-const settings=()=>({version:$('version').value,layers:Number($('layers').value),junkCount:Number($('junk-count').value),fontSize:Number($('font-size').value),rename:$('rename').checked,strings:$('strings').checked,oneline:$('oneline').checked,junk:$('junk').checked,watermarks:$('watermarks').checked});
+const settings=()=>({version:$('version').value,layers:Number($('layers').value),junkCount:Number($('junk-count').value),paddingKB:Number($('symbol-padding').value),fontSize:Number($('font-size').value),rename:$('rename').checked,strings:$('strings').checked,oneline:$('oneline').checked,junk:$('junk').checked,watermarks:$('watermarks').checked});
 const syncControls=()=>{
-  for(const [id,label]of [['layers','layers'],['junk-count','blocks'],['font-size','px']]){
+  for(const [id,label]of [['layers','layers'],['junk-count','blocks'],['symbol-padding','KB'],['font-size','px']]){
     const input=$(id),value=Number(input.value),progress=(value-Number(input.min))/(Number(input.max)-Number(input.min))*100;
     input.style.setProperty('--progress',progress+'%');$(id+'-value').textContent=value+' '+label;
     input.setAttribute('aria-valuetext',value+' '+(id==='font-size'?'pixels':label));
   }
   $('layers').disabled=Boolean(activeWorker)||!$('strings').checked;
   $('junk-count').disabled=Boolean(activeWorker)||!$('junk').checked;
+  $('symbol-padding').disabled=Boolean(activeWorker);
   $('font-size').disabled=Boolean(activeWorker);
-  for(const id of ['layers','junk-count','font-size'])$(id+'-control').classList.toggle('is-disabled',$(id).disabled);
+  for(const id of ['layers','junk-count','symbol-padding','font-size'])$(id+'-control').classList.toggle('is-disabled',$(id).disabled);
   document.documentElement.style.setProperty('--editor-font',$('font-size').value+'px');renderGutter();
 };
 const saveDraft=()=>{
@@ -578,7 +597,7 @@ for(const id of settingIds)$(id).addEventListener('change',()=>{
   if(id==='oneline'&&$('oneline').checked)$('strings').checked=true;
   syncControls();saveDraft();
 });
-for(const id of ['layers','junk-count','font-size'])$(id).addEventListener('input',()=>{syncControls();clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,350);});
+for(const id of ['layers','junk-count','symbol-padding','font-size'])$(id).addEventListener('input',()=>{syncControls();clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,350);});
 $('example').onclick=()=>{sourceBox.value='local greeting = "Hello"\nlocal function say(name)\n  local message = greeting .. ", " .. name\n  print(message)\nend\nsay("world")';setFileName('Example.lua');edited();};
 $('open-file').onclick=()=>{$('file').click();};
 async function readFile(file){
@@ -620,7 +639,7 @@ $('run').onclick=()=>{
       const result=message.result;
       if(!result||typeof result.code!=='string'){fail('The processor returned an invalid result.');return;}
       stopWorker();statusBox.textContent='Output is ready.';
-      const item={schema:2,output:result.code,renamed:result.renamed,junk:result.junk,encoded:result.encoded,uniqueStrings:result.uniqueStrings,layers:result.layers,watermarks:result.watermarks,version:settings().version};
+      const item={schema:2,output:result.code,renamed:result.renamed,junk:result.junk,encoded:result.encoded,uniqueStrings:result.uniqueStrings,layers:result.layers,paddingBytes:result.paddingBytes,watermarks:result.watermarks,version:settings().version};
       try{
         sessionStorage.removeItem('luaveil-result');
         sessionStorage.setItem('luaveil-result',JSON.stringify(item));
@@ -646,7 +665,8 @@ try{
     if(draft&&draft.settings&&typeof draft.settings==='object')for(const id of settingIds){
       if(id==='version'){if(['Luau','5.1','5.2','5.3','LuaJIT'].includes(draft.settings[id]))$(id).value=draft.settings[id];}
       else if(id==='layers'){if(Number.isInteger(draft.settings[id])&&draft.settings[id]>=1&&draft.settings[id]<=4)$(id).value=String(draft.settings[id]);}
-      else if(id==='junk-count'){if(Number.isInteger(draft.settings.junkCount)&&draft.settings.junkCount>=0&&draft.settings.junkCount<=12)$(id).value=String(draft.settings.junkCount);}
+      else if(id==='junk-count'){if(Number.isInteger(draft.settings.junkCount)&&draft.settings.junkCount>=0&&draft.settings.junkCount<=128)$(id).value=String(draft.settings.junkCount);}
+      else if(id==='symbol-padding'){if(Number.isInteger(draft.settings.paddingKB)&&draft.settings.paddingKB>=0&&draft.settings.paddingKB<=2048&&draft.settings.paddingKB%64===0)$(id).value=String(draft.settings.paddingKB);}
       else if(id==='font-size'){if(Number.isInteger(draft.settings.fontSize)&&draft.settings.fontSize>=12&&draft.settings.fontSize<=18)$(id).value=String(draft.settings.fontSize);}
       else if(typeof draft.settings[id]==='boolean')$(id).checked=draft.settings[id];
     }
