@@ -124,7 +124,9 @@ function scanLua(source) {
   return tokens;
 }
 
-/* Checks declared locals and lexical captures without mutating the AST.
+/* Checks local allocation and lexical captures without mutating the AST.
+ * Luau's optimized compiler folds immutable scalar declarations and reuses
+ * finished, noncaptured locals. Standard Lua modes retain lexical counting.
  * This is a targeted safety check, not a substitute for the target compiler.
  * Hidden loop registers, expression registers and other compiler limits are
  * intentionally outside its scope.
@@ -139,14 +141,18 @@ function checkCompilerLimits(ast, mode) {
   }
   const localLimit = 200, captureLimit = captureLimits[mode];
   const lexicalEnvironment = mode === '5.2' || mode === '5.3';
-  const functions = [];
+  const functions = [], scopes = [], localEvents = [], constantGroups = [];
   let maxLocals = 0, maxUpvalues = 0;
   const makeFunction = (parent, node) => {
     const item = { parent, node, activeLocals: 0, maxLocals: 0, captures: new Set() };
     functions.push(item);
     return item;
   };
-  const makeScope = (parent, owner) => ({ parent, owner, bindings: new Map(), declared: 0 });
+  const makeScope = (parent, owner) => {
+    const item = { parent, owner, bindings: new Map(), declared: [], checkpoints: [] };
+    scopes.push(item);
+    return item;
+  };
   const resolve = (scope, name) => {
     for (let current = scope; current; current = current.parent) {
       if (current.bindings.has(name)) return current.bindings.get(name);
@@ -159,18 +165,20 @@ function checkCompilerLimits(ast, mode) {
     throw new Error('Compiler safety check: ' + location + ' needs ' + count + ' ' + kind +
       '; ' + label + ' allows at most ' + limit + '. Reduce the locals or captures, or disable constant encoding.');
   };
-  const declare = (scope, name) => {
-    const binding = { owner: scope.owner, name };
+  const declare = (scope, name, reusable = false, position = Infinity) => {
+    const binding = { owner: scope.owner, name, written: false, captured: false, reusable, lastUse: position };
     scope.bindings.set(name, binding);
-    scope.declared++;
+    scope.declared.push(binding);
+    localEvents.push({ owner: scope.owner, binding, enter: true });
     const owner = scope.owner;
     owner.activeLocals++;
     owner.maxLocals = Math.max(owner.maxLocals, owner.activeLocals);
     maxLocals = Math.max(maxLocals, owner.maxLocals);
-    if (owner.activeLocals > localLimit) fail(owner, owner.activeLocals, 'active local variables', localLimit);
+    if (mode !== 'Luau' && owner.activeLocals > localLimit) fail(owner, owner.activeLocals, 'active local variables', localLimit);
     return binding;
   };
   const capture = (owner, binding) => {
+    if (owner !== binding.owner) binding.captured = true;
     // A descendant's capture must pass through each enclosing function.
     // The binding object, rather than its name, distinguishes shadowed locals.
     for (let current = owner; current && current !== binding.owner; current = current.parent) {
@@ -179,9 +187,14 @@ function checkCompilerLimits(ast, mode) {
       if (current.captures.size > captureLimit) fail(current, current.captures.size, 'upvalues', captureLimit);
     }
   };
-  const reference = (scope, name) => {
+  const reference = (scope, node, write) => {
+    const name = node.name;
     const binding = resolve(scope, name);
-    if (binding) capture(scope.owner, binding);
+    if (binding) {
+      binding.lastUse = Math.max(binding.lastUse, node.range ? node.range[1] : Infinity);
+      if (write) binding.written = true;
+      capture(scope.owner, binding);
+    }
     else if (lexicalEnvironment) {
       // In Lua 5.2/5.3, a global access is an access through the current _ENV.
       capture(scope.owner, resolve(scope, '_ENV'));
@@ -190,13 +203,14 @@ function checkCompilerLimits(ast, mode) {
   const inBlock = (parent, action) => {
     const inner = makeScope(parent, parent.owner);
     action(inner);
-    inner.owner.activeLocals -= inner.declared;
+    inner.owner.activeLocals -= inner.declared.length;
+    localEvents.push({ owner: inner.owner, leave: inner.declared });
   };
   const expressions = (nodes, scope) => { for (const node of nodes) expression(node, scope); };
-  const expression = (node, scope) => {
+  const expression = (node, scope, write = false) => {
     if (!node) return;
     switch (node.type) {
-      case 'Identifier': reference(scope, node.name); return;
+      case 'Identifier': reference(scope, node, write); return;
       case 'StringLiteral': case 'NumericLiteral': case 'BooleanLiteral':
       case 'NilLiteral': case 'VarargLiteral': return;
       case 'UnaryExpression': expression(node.argument, scope); return;
@@ -216,8 +230,8 @@ function checkCompilerLimits(ast, mode) {
   };
   const functionNode = (node, scope) => {
     if (node.identifier) {
-      if (node.isLocal) declare(scope, node.identifier.name);
-      else expression(node.identifier, scope);
+      if (node.isLocal) declare(scope, node.identifier.name, true, node.identifier.range ? node.identifier.range[1] : Infinity);
+      else expression(node.identifier, scope, true);
     }
     const owner = makeFunction(scope.owner, node);
     const inner = makeScope(scope, owner);
@@ -229,15 +243,26 @@ function checkCompilerLimits(ast, mode) {
     }
     statements(node.body, inner);
   };
-  const statements = (body, scope) => { for (const node of body) statement(node, scope); };
+  const statements = (body, scope) => {
+    for (const node of body) {
+      statement(node, scope);
+      const checkpoint = { owner: scope.owner, end: node.range ? node.range[1] : -Infinity, release: [] };
+      scope.checkpoints.push(checkpoint);
+      localEvents.push(checkpoint);
+    }
+  };
   const statement = (node, scope) => {
     switch (node.type) {
-      case 'LocalStatement':
+      case 'LocalStatement': {
         // The new names are not in scope in their own initializers.
         expressions(node.init, scope);
-        for (const variable of node.variables) declare(scope, variable.name);
+        const bindings = node.variables.map(variable => declare(scope, variable.name, true, variable.range ? variable.range[1] : Infinity));
+        constantGroups.push({ bindings, init: node.init });
         return;
-      case 'AssignmentStatement': expressions(node.variables, scope); expressions(node.init, scope); return;
+      }
+      case 'AssignmentStatement':
+        for (const variable of node.variables) expression(variable, scope, true);
+        expressions(node.init, scope); return;
       case 'CallStatement': expression(node.expression, scope); return;
       case 'FunctionDeclaration': functionNode(node, scope); return;
       case 'ReturnStatement': expressions(node.arguments, scope); return;
@@ -275,6 +300,53 @@ function checkCompilerLimits(ast, mode) {
     capture(chunk, environment);
   }
   statements(ast.body, root);
+  if (mode === 'Luau') {
+    const scalar = node => {
+      if (['StringLiteral','NumericLiteral','BooleanLiteral','NilLiteral'].includes(node.type)) return true;
+      return node.type === 'UnaryExpression' &&
+        (node.operator === 'not' && scalar(node.argument) ||
+         node.operator === '-' && node.argument.type === 'NumericLiteral' ||
+         node.operator === '#' && node.argument.type === 'StringLiteral');
+    };
+    const omitted = new Set();
+    for (const group of constantGroups) {
+      // Luau omits the complete declaration only. Calls/varargs can expand
+      // into missing values, and extra RHS expressions can have side effects.
+      if (group.init.length <= group.bindings.length && group.init.every(scalar) && group.bindings.every(binding => !binding.written)) {
+        for (const binding of group.bindings) omitted.add(binding);
+      }
+    }
+    for (const scope of scopes) {
+      for (const binding of scope.declared) {
+        if (!binding.reusable || binding.captured || omitted.has(binding)) continue;
+        // Release only at a boundary in the declaring block. Releasing an
+        // outer variable inside a loop/branch would undercount future uses.
+        let low = 0, high = scope.checkpoints.length;
+        while (low < high) {
+          const middle = (low + high) >>> 1;
+          if (scope.checkpoints[middle].end < binding.lastUse) low = middle + 1;
+          else high = middle;
+        }
+        if (low < scope.checkpoints.length) scope.checkpoints[low].release.push(binding);
+      }
+    }
+    maxLocals = 0;
+    for (const owner of functions) { owner.activeLocals = 0; owner.maxLocals = 0; owner.live = new Set(); }
+    for (const event of localEvents) {
+      const owner = event.owner;
+      if (event.enter && !omitted.has(event.binding)) {
+        owner.live.add(event.binding);
+        owner.activeLocals++;
+        owner.maxLocals = Math.max(owner.maxLocals, owner.activeLocals);
+        maxLocals = Math.max(maxLocals, owner.maxLocals);
+        if (owner.activeLocals > localLimit) fail(owner, owner.activeLocals, 'active local variables', localLimit);
+      } else {
+        for (const binding of event.leave || event.release || []) {
+          if (owner.live.delete(binding)) owner.activeLocals--;
+        }
+      }
+    }
+  }
   return { maxLocals, maxUpvalues, functions: functions.length };
 }
 
