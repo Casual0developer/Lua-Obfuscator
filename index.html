@@ -300,6 +300,7 @@ function checkCompilerLimits(ast, mode) {
     capture(chunk, environment);
   }
   statements(ast.body, root);
+  const lexicalMaxLocals = maxLocals, chunkLexicalLocals = chunk.maxLocals;
   if (mode === 'Luau') {
     const scalar = node => {
       if (['StringLiteral','NumericLiteral','BooleanLiteral','NilLiteral'].includes(node.type)) return true;
@@ -347,7 +348,7 @@ function checkCompilerLimits(ast, mode) {
       }
     }
   }
-  return { maxLocals, maxUpvalues, functions: functions.length };
+  return { maxLocals, maxUpvalues, functions: functions.length, lexicalMaxLocals, chunkLexicalLocals };
 }
 
 function obfuscateLua(source, supplied = {}) {
@@ -421,7 +422,7 @@ function obfuscateLua(source, supplied = {}) {
   };
   let ast;
   try { ast=parse(source); } catch(error) { throw new Error('Lua syntax error: '+error.message); }
-  checkCompilerLimits(ast,options.version);
+  const inputLimits=checkCompilerLimits(ast,options.version);
   const used = new Set(source.match(/[A-Za-z_][A-Za-z_0-9]*/g) || []);
   const fresh=()=>{
     let name;
@@ -432,6 +433,27 @@ function obfuscateLua(source, supplied = {}) {
   let renamed=0, encoded=0;
   const decoder=options.strings?fresh():null, poolName=options.strings?fresh():null;
   const byteFn=options.strings?fresh():null, charFn=options.strings?fresh():null, joinFn=options.strings?fresh():null;
+  // Some Luau hosts enforce the 200-local ceiling before optimized register
+  // reuse. Move enough simple chunk locals into one private table so output
+  // remains below that ceiling even under the stricter compiler path.
+  const STRICT_CHUNK_BUDGET=170;
+  const spillNeeded=isLuau?Math.max(0,inputLimits.chunkLexicalLocals+(options.strings?1:0)+1-STRICT_CHUNK_BUDGET):0;
+  const spillStatements=[];
+  if(spillNeeded){
+    for(const node of ast.body){
+      if(node.type!=='LocalStatement'||node.variables.length!==1||node.init.length===0)continue;
+      const variable=node.variables[0],prefix=source.slice(node.range[0],variable.range[0]);
+      if(prefix.trim()!=='local'||variable.name==='_ENV')continue;
+      spillStatements.push(node);
+      if(spillStatements.length===spillNeeded)break;
+    }
+    if(spillStatements.length<spillNeeded)throw new Error('Compiler safety check: this chunk needs fewer top-level locals for strict Luau hosts. Split large setup sections into functions or blocks.');
+  }
+  const stateName=spillStatements.length?fresh():null, spilled=new Map();
+  spillStatements.forEach((node,index)=>{
+    spilled.set(node.variables[0],`${stateName}[${index+1}]`);
+    edits.push({start:node.range[0],end:node.variables[0].range[0],text:' '});
+  });
   const pool=[], poolIndex=new Map();
   function luaLiteral(text){
     let equals='';
@@ -497,7 +519,7 @@ function obfuscateLua(source, supplied = {}) {
   const scope=parent=>({parent,bindings:new Map()});
   const lookup=(current,name)=>{for(let item=current;item;item=item.parent)if(item.bindings.has(name))return item.bindings.get(name);return null;};
   const declare=(current,node)=>{
-    const name=options.rename&&node.name!=='_ENV'?fresh():null;
+    const name=spilled.get(node)||(options.rename&&node.name!=='_ENV'?fresh():null);
     current.bindings.set(node.name,name);if(name){replace(node,name);renamed++;}
   };
   const expression=(node,current,functionName=false)=>{
@@ -578,6 +600,7 @@ function obfuscateLua(source, supplied = {}) {
     const initializer=`(function(${byteFn},${charFn},${joinFn})local map={}local alphabet=${luaLiteral(alphabet)} for i=1,64 do map[${byteFn}(alphabet,i)]=i-1 end local function ${decoder}(s)local v={}for i=1,#s,4 do local a,b,c,d=${byteFn}(s,i,i+3) a=map[a] b=map[b] c=map[c] d=map[d] v[#v+1]=a*4+(b-b%16)/16 if c then v[#v+1]=(b%16)*16+(c-c%4)/4 end if d then v[#v+1]=(c%4)*64+d end end local count=v[1] local offset=1+count*5 local n=#v-offset for layer=count,1,-1 do local at=2+(layer-1)*5 local inv,key,step,previous,rev=v[at],v[at+1],v[at+2],v[at+3],v[at+4] if rev==1 then for i=1,(n-n%2)/2 do v[offset+i],v[offset+n-i+1]=v[offset+n-i+1],v[offset+i] end end for i=1,n do local e=v[offset+i] v[offset+i]=(e*inv-key-i*step-previous)%256 previous=e end end local o={}for i=1,n do o[i]=${charFn}(v[offset+i])end return ${joinFn}(o)end return {${shuffled.map(item=>item.entry).join(',')}}end)(string.byte,string.char,table.concat)`;
     output=`local ${poolName}=${initializer}\n`+output;
   }
+  if(stateName)output=`local ${stateName}={}\n`+output;
   let junk=0;
   if(options.junk&&options.junkCount){const blocks=[];for(let i=0;i<options.junkCount;i++){const name=fresh(),value=100+crypto.getRandomValues(new Uint16Array(1))[0]%900;blocks.push(`do local ${name}=${value};${name}=${name}+1 end`);junk++;}output=blocks.join('\n')+'\n'+output;}
   if(options.oneline)output=output.replace(/\s+/g,' ').trim();
