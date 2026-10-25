@@ -40,7 +40,7 @@ The new checksum catches damaged records. It is not a signature, keyed authentic
 - 31 compiler-limit assertions, 22 existing compiler accept/reject cases, and four additional synthetic runtime comparisons passed.
 - 18 focused official Luau compiler checks passed, including optimization disabled, strict register-reuse flags, and a 200-parameter boundary case.
 - 17 worker/editor checks and 15 output/help checks passed, including unsafe HTML rendered as text, storage fallback, presets, new controls, and processing the complete attachment.
-- The latest complete attachment was regenerated with 673 unique encoded constants, 977 masked integers, 52 packed locals, 32 junk blocks, 512 KiB padding, and a maximum of 170 declared active locals in any generated function. The exact delivered file passed official Luau compilation at O0, O1, O2, and O1 with local-register reuse disabled.
+- The earlier full-key build used 673 unique encoded constants, 977 masked integers, 52 packed locals, 32 junk blocks, 512 KiB padding, and a maximum of 170 declared active locals in any generated function. It passed official Luau compilation at O0, O1, O2, and O1 with local-register reuse disabled. The subsequent performance pass and current Compact artifact are documented in [PERFORMANCE.md](PERFORMANCE.md).
 
 The full Roblox script was compiled only. Roblox execution and executor-specific runtime behavior remain unverified. Browser interaction checks used a DOM and real worker test harness; this pass did not inspect the live browser's pixels.
 

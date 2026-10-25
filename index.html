@@ -35,6 +35,7 @@
       <section class="config-section"><h3 class="section-label">Language &amp; identifiers</h3><label class="field-label" for="version">Lua version</label><div class="select-wrap"><select id="version"><option value="Luau" selected>Luau / Roblox</option><option value="5.1">Lua 5.1</option><option value="5.2">Lua 5.2</option><option value="5.3">Lua 5.3</option><option value="LuaJIT">LuaJIT</option></select></div><label class="toggle-row" for="rename"><span class="toggle-text"><strong>Scramble local names</strong><small>Rename declarations and their references.</small></span><span class="switch-control"><input id="rename" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label></section>
       <section class="config-section"><h3 class="section-label">Encoding</h3><div class="editor-tools" role="group" aria-label="Output presets"><button class="small-button" id="preset-compact" type="button" title="One layer, four junk blocks, no padding">Compact</button><button class="small-button" id="preset-balanced" type="button" title="Three layers, sixteen junk blocks, 64 KB padding">Balanced</button><button class="small-button" id="preset-large" type="button" title="Four layers, sixty-four junk blocks, 512 KB padding">Large</button></div><label class="toggle-row" for="strings"><span class="toggle-text"><strong>Encode strings &amp; keys</strong><small>Varied layers with decoded-data checks.</small></span><span class="switch-control"><input id="strings" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label><label class="toggle-row" for="numbers"><span class="toggle-text"><strong>Mask integer constants</strong><small>Replace supported integers with exact arithmetic.</small></span><span class="switch-control"><input id="numbers" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label><div class="range-control" id="layers-control"><div class="range-header"><label for="layers">Encoding layers</label><output id="layers-value" for="layers">3 layers</output></div><input class="range-slider" id="layers" type="range" min="1" max="4" step="1" value="3" aria-describedby="layers-help"><div class="range-scale" aria-hidden="true"><span>Fast</span><span>Layered</span></div><p class="control-note" id="layers-help">Decoded once. More layers add startup work.</p></div></section>
       <section class="config-section"><h3 class="section-label">Code layout</h3>
+        <label class="toggle-row" for="fast"><span class="toggle-text"><strong>Preserve fast field access</strong><small>Leaves field names readable so Luau can optimize them. Encoded loop strings use cached locals.</small></span><span class="switch-control"><input id="fast" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label>
         <label class="toggle-row" for="oneline"><span class="toggle-text"><strong>Single-line code body</strong><small>Keep watermark comments on header lines.</small></span><span class="switch-control"><input id="oneline" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label>
         <label class="toggle-row" for="removeComments"><span class="toggle-text"><strong>Remove source comments</strong><small>Discard comments in multiline output too.</small></span><span class="switch-control"><input id="removeComments" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label>
         <label class="toggle-row" for="junk"><span class="toggle-text"><strong>Add junk blocks</strong><small>Isolated calculations before the script.</small></span><span class="switch-control"><input id="junk" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span></label>
@@ -145,12 +146,12 @@ function checkCompilerLimits(ast, mode, collectOnly = false) {
   const functions = [], scopes = [], localEvents = [], constantGroups = [];
   let maxLocals = 0, maxUpvalues = 0;
   const makeFunction = (parent, node) => {
-    const item = { parent, node, activeLocals: 0, maxLocals: 0, captures: new Set() };
+    const item = { parent, node, activeLocals: 0, maxLocals: 0, captures: new Set(), bindings: [] };
     functions.push(item);
     return item;
   };
   const makeScope = (parent, owner) => {
-    const item = { parent, owner, bindings: new Map(), declared: [], checkpoints: [] };
+    const item = { parent, owner, loopDepth:parent&&parent.owner===owner?parent.loopDepth:0, bindings: new Map(), declared: [], checkpoints: [] };
     scopes.push(item);
     return item;
   };
@@ -168,7 +169,8 @@ function checkCompilerLimits(ast, mode, collectOnly = false) {
       '; ' + label + ' allows at most ' + limit + '. Reduce the locals or captures, or disable constant encoding.');
   };
   const declare = (scope, name, reusable = false, position = Infinity) => {
-    const binding = { owner: scope.owner, name, written: false, captured: false, reusable, lastUse: position };
+    const binding = { owner: scope.owner, name, position, references:0, written: false, captured: false, reusable, lastUse: position };
+    scope.owner.bindings.push(binding);
     scope.bindings.set(name, binding);
     scope.declared.push(binding);
     localEvents.push({ owner: scope.owner, binding, enter: true });
@@ -193,6 +195,7 @@ function checkCompilerLimits(ast, mode, collectOnly = false) {
     const name = node.name;
     const binding = resolve(scope, name);
     if (binding) {
+      binding.references+=scope.loopDepth?16:1;
       binding.lastUse = Math.max(binding.lastUse, node.range ? node.range[1] : Infinity);
       if (write) binding.written = true;
       capture(scope.owner, binding);
@@ -202,8 +205,9 @@ function checkCompilerLimits(ast, mode, collectOnly = false) {
       capture(scope.owner, resolve(scope, '_ENV'));
     }
   };
-  const inBlock = (parent, action) => {
+  const inBlock = (parent, action, loop = false) => {
     const inner = makeScope(parent, parent.owner);
+    if(loop)inner.loopDepth++;
     action(inner);
     inner.owner.activeLocals -= inner.declared.length;
     localEvents.push({ owner: inner.owner, leave: inner.declared });
@@ -271,9 +275,9 @@ function checkCompilerLimits(ast, mode, collectOnly = false) {
       case 'BreakStatement': case 'GotoStatement': case 'LabelStatement': return;
       case 'DoStatement': inBlock(scope, inner => statements(node.body, inner)); return;
       case 'WhileStatement':
-        expression(node.condition, scope); inBlock(scope, inner => statements(node.body, inner)); return;
+        expression(node.condition, scope); inBlock(scope, inner => statements(node.body, inner),true); return;
       case 'RepeatStatement':
-        inBlock(scope, inner => { statements(node.body, inner); expression(node.condition, inner); }); return;
+        inBlock(scope, inner => { statements(node.body, inner); expression(node.condition, inner); },true); return;
       case 'IfStatement':
         for (const clause of node.clauses) {
           expression(clause.condition, scope);
@@ -282,14 +286,14 @@ function checkCompilerLimits(ast, mode, collectOnly = false) {
         return;
       case 'ForNumericStatement':
         expression(node.start, scope); expression(node.end, scope); expression(node.step, scope);
-        inBlock(scope, inner => { declare(inner, node.variable.name); statements(node.body, inner); });
+        inBlock(scope, inner => { declare(inner, node.variable.name); statements(node.body, inner); },true);
         return;
       case 'ForGenericStatement':
         expressions(node.iterators, scope);
         inBlock(scope, inner => {
           for (const variable of node.variables) declare(inner, variable.name);
           statements(node.body, inner);
-        });
+        },true);
         return;
       default: throw new Error('Compiler safety check: unsupported statement ' + node.type + '.');
     }
@@ -303,7 +307,7 @@ function checkCompilerLimits(ast, mode, collectOnly = false) {
   }
   statements(ast.body, root);
   const lexicalMaxLocals = maxLocals, chunkLexicalLocals = chunk.maxLocals;
-  const functionLimits = functions.map(owner => ({node:owner.node,lexicalLocals:owner.maxLocals}));
+  const functionLimits = functions.map(owner => ({node:owner.node,lexicalLocals:owner.maxLocals,bindings:owner.bindings.map(binding=>({position:binding.position,references:binding.references,captured:binding.captured,written:binding.written}))}));
   if (mode === 'Luau') {
     const scalar = node => {
       if (['StringLiteral','NumericLiteral','BooleanLiteral','NilLiteral'].includes(node.type)) return true;
@@ -355,12 +359,13 @@ function checkCompilerLimits(ast, mode, collectOnly = false) {
 }
 
 function obfuscateLua(source, supplied = {}) {
+  const buildStarted=Date.now();
   if (typeof source !== 'string') throw new Error('Input must be Lua source text.');
   if (!source.trim()) throw new Error('Paste Lua code or open a file first.');
   const MAX_INPUT = 1024 * 1024, MAX_OUTPUT = 8 * 1024 * 1024;
   if (source.length > MAX_INPUT || new TextEncoder().encode(source).length > MAX_INPUT)
     throw new Error('The input is too large. Open a Lua file smaller than 1 MB.');
-  const options = {version:'Luau',rename:true,strings:true,numbers:true,removeComments:true,oneline:true,junk:true,junkCount:32,paddingKB:512,watermarks:true,layers:3,...supplied};
+  const options = {version:'Luau',rename:true,strings:true,fast:true,numbers:true,removeComments:true,oneline:true,junk:true,junkCount:32,paddingKB:512,watermarks:true,layers:3,...supplied};
   if (!['Luau','5.1','5.2','5.3','LuaJIT'].includes(options.version)) throw new Error('Choose a supported Lua version.');
   if (!Number.isInteger(options.layers)||options.layers<1||options.layers>4)throw new Error('Choose between one and four encoding layers.');
   if(!Number.isInteger(options.junkCount)||options.junkCount<0||options.junkCount>128)throw new Error('Choose between zero and 128 junk blocks.');
@@ -448,13 +453,19 @@ function obfuscateLua(source, supplied = {}) {
   try { ast=parse(source); } catch(error) { throw new Error('Lua syntax error: '+error.message); }
   const inputLimits=checkCompilerLimits(ast,options.version,isLuau);
   const used = new Set(source.match(/[A-Za-z_][A-Za-z_0-9]*/g) || []);
+  let entropy=new Uint8Array(0),entropyAt=0;
+  const randomBytes=length=>{
+    if(entropyAt+length>entropy.length){entropy=crypto.getRandomValues(new Uint8Array(8192));entropyAt=0;}
+    const bytes=entropy.slice(entropyAt,entropyAt+length);entropyAt+=length;return bytes;
+  };
+  const randomWord=()=>{const b=randomBytes(4);return (b[0]|b[1]<<8|b[2]<<16|b[3]<<24)>>>0;};
   const fresh=()=>{
     let name;
-    do { const bytes=crypto.getRandomValues(new Uint8Array(6)); name='_0x'+Array.from(bytes,byte=>byte.toString(16).padStart(2,'0')).join(''); } while(used.has(name));
+    do { const bytes=randomBytes(6); name='_0x'+Array.from(bytes,byte=>byte.toString(16).padStart(2,'0')).join(''); } while(used.has(name));
     used.add(name); return name;
   };
   const edits=[];
-  let renamed=0, encoded=0, maskedNumbers=0, normalizedFunctions=0;
+  let renamed=0, encoded=0, maskedNumbers=0, normalizedFunctions=0, fastAccesses=0;
   const decoder=options.strings?fresh():null, poolName=options.strings?fresh():null;
   const byteFn=options.strings?fresh():null, charFn=options.strings?fresh():null, joinFn=options.strings?fresh():null;
   // Apply the strict-host budget independently to each function, including
@@ -464,20 +475,24 @@ function obfuscateLua(source, supplied = {}) {
   if(isLuau)for(const report of inputLimits.functionLimits){
     const root=report.node===ast, extra=root&&options.strings?1:0;
     if(report.lexicalLocals+extra<=STRICT_CHUNK_BUDGET)continue;
-    const needed=report.lexicalLocals+extra+1-STRICT_CHUNK_BUDGET, candidates=[];let count=0;
+    const needed=report.lexicalLocals+extra+1-STRICT_CHUNK_BUDGET, candidates=[],possible=[];let count=0;
     for(const node of report.node.body){
       if(node.type!=='LocalStatement'||node.variables.length>16)continue;
       const variable=node.variables[0];
       if(source.slice(node.range[0],variable.range[0]).trim()!=='local'||node.variables.some(item=>item.name==='_ENV'))continue;
-      candidates.push(node);count+=node.variables.length;if(count>=needed)break;
+      possible.push(node);
     }
+    const bindingByPosition=new Map(report.bindings.map(binding=>[binding.position,binding]));
+    const cost=node=>node.variables.reduce((sum,variable)=>{const binding=bindingByPosition.get(variable.range[1]);return sum+(binding?binding.references+(binding.captured?1000:0)+(binding.written?250:0):10000);},0);
+    possible.sort((a,b)=>cost(a)-cost(b)||a.range[0]-b.range[0]);
+    for(const node of possible){candidates.push(node);count+=node.variables.length;if(count>=needed)break;}
     if(count<needed){
       // A large parameter list may already fit the real limit without any
       // packable locals. The 170-slot target is headroom, not a language limit.
       if(count<=1&&report.lexicalLocals+extra<=200)continue;
       if(report.lexicalLocals+extra+1-count>200)throw new Error('Compiler safety check: a large Luau function needs more simple local declarations to pack safely. Split its setup into smaller functions or blocks.');
     }
-    const name=fresh();statePlans.push({node:report.node,name});
+    const name=fresh();statePlans.push({node:report.node,name,localCount:report.lexicalLocals+extra+1-count});
     let slot=0;
     candidates.forEach(node=>{
       node.variables.forEach(variable=>spilled.set(variable,`${name}[${++slot}]`));
@@ -501,7 +516,8 @@ function obfuscateLua(source, supplied = {}) {
     for(let i=0;i<bytes.length;i+=3){const a=bytes[i],b=bytes[i+1],c=bytes[i+2];parts.push(alphabet[a>>>2],alphabet[((a&3)<<4)|((b||0)>>>4)],b===undefined?'':alphabet[((b&15)<<2)|((c||0)>>>6)],c===undefined?'':alphabet[c&63]);}
     return parts.join('');
   };
-  const toBytes=text=>Array.from(new TextEncoder().encode(text));
+  const textEncoder=new TextEncoder();
+  const toBytes=text=>Array.from(textEncoder.encode(text));
   const literalBytes=raw=>{
     if(raw[0]==='[') {
       const match=/^\[(=*)\[/.exec(raw);
@@ -529,7 +545,9 @@ function obfuscateLua(source, supplied = {}) {
     flush(); return bytes;
   };
   const encodedBytes=bytes=>{
-    encoded++; const signature=bytes.join(',');
+    encoded++; const signatureParts=[];
+    for(let at=0;at<bytes.length;at+=8192)signatureParts.push(String.fromCharCode(...bytes.slice(at,at+8192)));
+    const signature=signatureParts.join('');
     let index=poolIndex.get(signature);
     if(index===undefined){
       let sum=1,weighted=0;
@@ -538,7 +556,8 @@ function obfuscateLua(source, supplied = {}) {
       for(let layer=0;layer<options.layers;layer++){
         const random=crypto.getRandomValues(new Uint8Array(7));
         const multiplier=(random[0]|1)===1?3:(random[0]|1),key=random[1],step=random[2],seed=random[3],reverse=random[4]&1,mode=random[5]%3,feedback=random[6]%3;
-        let inverse=1;while((inverse*multiplier)%256!==1)inverse+=2;
+        let inverse=(multiplier*(2-multiplier*multiplier))&255;
+        inverse=(inverse*(2-multiplier*inverse))&255;
         metadata.push(inverse,key,step,seed,reverse,mode,feedback);
         const next=new Array(transformed.length);let previous=seed;
         for(let i=0;i<transformed.length;i++){
@@ -553,19 +572,33 @@ function obfuscateLua(source, supplied = {}) {
     }
     return `${poolName}[${index}]`;
   };
-  const encodeText=text=>encodedBytes(toBytes(text));
+  const textCache=new Map(),literalCache=new Map();
+  const encodeText=text=>{if(textCache.has(text)){encoded++;return textCache.get(text);}const result=encodedBytes(toBytes(text));textCache.set(text,result);return result;};
+  const encodeLiteral=raw=>{if(literalCache.has(raw)){encoded++;return literalCache.get(raw);}const result=encodedBytes(literalBytes(raw));literalCache.set(raw,result);return result;};
+  const hotAliases=new Map(),limitsByFunction=new Map(inputLimits.functionLimits.map(report=>[report.node,report]));
+  const bindHot=(reference,current)=>{
+    if(!options.fast||!isLuau||!current.loopDepth)return reference;
+    const plan=statePlans.find(item=>item.node===current.owner),report=limitsByFunction.get(current.owner);
+    const locals=plan?plan.localCount:report.lexicalLocals+(current.owner===ast?1:0);
+    const budget=Math.max(0,Math.min(8,198-locals));if(!budget)return reference;
+    let aliases=hotAliases.get(current.owner);if(!aliases){aliases=new Map();hotAliases.set(current.owner,aliases);}
+    if(aliases.has(reference))return aliases.get(reference);
+    if(aliases.size>=budget)return reference;
+    const name=fresh();aliases.set(reference,name);return name;
+  };
   const maskNumber=node=>{
     const raw=source.slice(...node.range), normalized=isLuau?raw.replace(/_/g,''):raw;
     if(!/^(?:0[xX][0-9a-fA-F]+|0[bB][01]+|\d+)$/.test(normalized))return;
     const value=Number(normalized);
     if(!Number.isInteger(value)||value<0||value>0x7fffffff)return;
     // Keep every intermediate exactly representable in all supported targets.
-    const random=crypto.getRandomValues(new Uint16Array(2)),salt=1+random[0],hex=number=>'0x'+number.toString(16);
+    const random=randomBytes(4),salt=1+(random[0]|random[1]<<8),hex=number=>'0x'+number.toString(16);
     const forms=[`(${hex(value+salt)}-${hex(salt)})`,value>=salt?`(${hex(value-salt)}+${hex(salt)})`:`(${hex(salt)}-${hex(salt-value)})`,`((${hex(value+salt)}-${hex(salt*2)})+${hex(salt)})`];
-    edits.push({start:node.range[0],end:node.range[1],text:forms[random[1]%forms.length]});maskedNumbers++;
+    edits.push({start:node.range[0],end:node.range[1],text:forms[(random[2]|random[3]<<8)%forms.length]});maskedNumbers++;
   };
   const replace=(node,name)=>{if(name&&node&&node.type==='Identifier')edits.push({start:node.range[0],end:node.range[1],text:name});};
-  const scope=parent=>({parent,bindings:new Map()});
+  const scope=(parent,owner=parent?parent.owner:ast,loopDepth=parent?parent.loopDepth:0)=>({parent,owner,loopDepth,bindings:new Map()});
+  const loopScope=parent=>scope(parent,parent.owner,parent.loopDepth+1);
   const lookup=(current,name)=>{for(let item=current;item;item=item.parent)if(item.bindings.has(name))return item.bindings.get(name);return null;};
   const declare=(current,node)=>{
     const name=spilled.get(node)||(options.rename&&node.name!=='_ENV'?fresh():null);
@@ -575,14 +608,15 @@ function obfuscateLua(source, supplied = {}) {
     if(!node)return;
     switch(node.type){
       case 'Identifier':replace(node,lookup(current,node.name));return;
-      case 'StringLiteral':if(options.strings)edits.push({start:node.range[0],end:node.range[1],text:encodedBytes(literalBytes(source.slice(...node.range)))});return;
+      case 'StringLiteral':if(options.strings)edits.push({start:node.range[0],end:node.range[1],text:bindHot(encodeLiteral(source.slice(...node.range)),current)});return;
       case 'NumericLiteral':if(options.numbers)maskNumber(node);return;
       case 'BooleanLiteral':case 'NilLiteral':case 'VarargLiteral':return;
       case 'UnaryExpression':expression(node.argument,current);return;
       case 'BinaryExpression':case 'LogicalExpression':expression(node.left,current);expression(node.right,current);return;
       case 'MemberExpression':{
         expression(node.base,current,functionName);
-        if(options.strings&&!functionName&&node.indexer==='.'){
+        if(options.strings&&options.fast&&node.indexer==='.')fastAccesses++;
+        if(options.strings&&!options.fast&&!functionName&&node.indexer==='.'){
           // Read punctuation tokens so dots in intervening comments cannot be mistaken for the member operator.
           const between=scanLua(source.slice(node.base.range[1],node.identifier.range[0]));
           const dot=between.find(token=>token.value==='.');
@@ -591,13 +625,13 @@ function obfuscateLua(source, supplied = {}) {
           edits.push({start:at,end:at+1,text:'['},{start:node.identifier.range[0],end:node.identifier.range[1],text:encodeText(node.identifier.name)+']'});
         }return;
       }
-      case 'IndexExpression':expression(node.base,current);expression(node.index,current);return;
+      case 'IndexExpression':expression(node.base,current);if(options.fast&&node.index.type==='StringLiteral')fastAccesses++;else expression(node.index,current);return;
       case 'CallExpression':expression(node.base,current);node.arguments.forEach(arg=>expression(arg,current));return;
       case 'TableCallExpression':expression(node.base,current);expression(node.arguments,current);return;
-      case 'StringCallExpression':expression(node.base,current);if(options.strings)edits.push({start:node.argument.range[0],end:node.argument.range[1],text:'('+encodedBytes(literalBytes(source.slice(...node.argument.range)))+')'});else expression(node.argument,current);return;
+      case 'StringCallExpression':expression(node.base,current);if(options.strings)edits.push({start:node.argument.range[0],end:node.argument.range[1],text:'('+bindHot(encodeLiteral(source.slice(...node.argument.range)),current)+')'});else expression(node.argument,current);return;
       case 'TableConstructorExpression':node.fields.forEach(field=>expression(field,current));return;
-      case 'TableKey':expression(node.key,current);expression(node.value,current);return;
-      case 'TableKeyString':if(options.strings)edits.push({start:node.key.range[0],end:node.key.range[1],text:'['+encodeText(node.key.name)+']'});expression(node.value,current);return;
+      case 'TableKey':if(options.fast&&node.key.type==='StringLiteral')fastAccesses++;else expression(node.key,current);expression(node.value,current);return;
+      case 'TableKeyString':if(options.strings&&!options.fast)edits.push({start:node.key.range[0],end:node.key.range[1],text:'['+encodeText(node.key.name)+']'});else if(options.fast)fastAccesses++;expression(node.value,current);return;
       case 'TableValue':expression(node.value,current);return;
       case 'FunctionDeclaration':functionNode(node,current);return;
       default:throw new Error('Unsupported Lua expression: '+node.type);
@@ -609,7 +643,8 @@ function obfuscateLua(source, supplied = {}) {
     const operator=scanLua(source.slice(node.base.range[1],node.identifier.range[0])).find(token=>token.value===node.indexer);
     if(!operator)throw new Error('Could not safely locate a function member operator.');
     const at=node.base.range[1]+operator.start;
-    if(options.strings){edits.push({start:at,end:at+1,text:'['},{start:node.identifier.range[0],end:node.identifier.range[1],text:encodeText(node.identifier.name)+']'});}
+    if(options.fast)fastAccesses++;
+    if(options.strings&&!options.fast){edits.push({start:at,end:at+1,text:'['},{start:node.identifier.range[0],end:node.identifier.range[1],text:encodeText(node.identifier.name)+']'});}
     else if(node.indexer===':')edits.push({start:at,end:at+1,text:'.'});
   };
   const functionNode=(node,current)=>{
@@ -621,7 +656,7 @@ function obfuscateLua(source, supplied = {}) {
         normalizedFunctions++;
       }
     }
-    const inner=scope(current);
+    const inner=scope(current,node,0);
     if(node.identifier&&node.identifier.type==='MemberExpression'&&node.identifier.indexer===':'){
       const selfName=options.rename?fresh():'self';inner.bindings.set('self',selfName);
       const headerEnd=node.parameters[0]?.range[0]??node.body[0]?.range[0]??node.range[1];
@@ -643,15 +678,19 @@ function obfuscateLua(source, supplied = {}) {
       case 'ReturnStatement':node.arguments.forEach(arg=>expression(arg,current));return;
       case 'BreakStatement':case 'GotoStatement':case 'LabelStatement':return;
       case 'DoStatement':statements(node.body,scope(current));return;
-      case 'WhileStatement':expression(node.condition,current);statements(node.body,scope(current));return;
-      case 'RepeatStatement':{const inner=scope(current);statements(node.body,inner);expression(node.condition,inner);return;}
+      case 'WhileStatement':{const inner=loopScope(current);expression(node.condition,inner);statements(node.body,inner);return;}
+      case 'RepeatStatement':{const inner=loopScope(current);statements(node.body,inner);expression(node.condition,inner);return;}
       case 'IfStatement':node.clauses.forEach(clause=>{expression(clause.condition,current);statements(clause.body,scope(current));});return;
-      case 'ForNumericStatement':{expression(node.start,current);expression(node.end,current);expression(node.step,current);const inner=scope(current);declare(inner,node.variable);statements(node.body,inner);return;}
-      case 'ForGenericStatement':{node.iterators.forEach(expr=>expression(expr,current));const inner=scope(current);node.variables.forEach(variable=>declare(inner,variable));statements(node.body,inner);return;}
+      case 'ForNumericStatement':{expression(node.start,current);expression(node.end,current);expression(node.step,current);const inner=loopScope(current);declare(inner,node.variable);statements(node.body,inner);return;}
+      case 'ForGenericStatement':{node.iterators.forEach(expr=>expression(expr,current));const inner=loopScope(current);node.variables.forEach(variable=>declare(inner,variable));statements(node.body,inner);return;}
       default:throw new Error('Unsupported Lua statement: '+node.type);
     }
   };
   statements(ast.body,scope(null));
+  const aliasDeclaration=aliases=>'local '+[...aliases.values()].join(',')+'='+[...aliases.keys()].join(',')+'\n';
+  for(const [owner,aliases]of hotAliases){
+    if(owner!==ast){const at=owner.body[0].range[0];edits.push({start:at,end:at,text:aliasDeclaration(aliases)});}
+  }
   const shebang=source.startsWith('#!')?source.split(/\r\n|\n\r|\r|\n/,1)[0]:'';
   if(shebang)edits.push({start:0,end:shebang.length,text:' '});
   for(const comment of ast.comments||[]) {
@@ -667,11 +706,18 @@ function obfuscateLua(source, supplied = {}) {
   }
   output+=source.slice(end);
   const shuffled=pool.map((entry,index)=>({entry,oldIndex:index+1}));
-  for(let i=shuffled.length-1;i>0;i--){const random=crypto.getRandomValues(new Uint32Array(1))[0]%(i+1);[shuffled[i],shuffled[random]]=[shuffled[random],shuffled[i]];}
+  for(let i=shuffled.length-1;i>0;i--){const random=randomWord()%(i+1);[shuffled[i],shuffled[random]]=[shuffled[random],shuffled[i]];}
   const newIndex=[];shuffled.forEach((item,index)=>{newIndex[item.oldIndex]=index+1;});
   if(pool.length){
     output=output.replace(new RegExp(poolName+'\\[(\\d+)\\]','g'),(_,index)=>`${poolName}[${newIndex[Number(index)]}]`);
-    const initializer=`(function(${byteFn},${charFn},${joinFn},raise)
+    const decodeLoops=[];
+    for(let mode=0;mode<3;mode++)for(let feedback=0;feedback<3;feedback++){
+      const plain=['(e*inv-key-position-previous)%256','((e-key-position-previous)*inv)%256','((e-previous)*inv-key-position)%256'][mode];
+      const update=['e','plain','(plain+e)%256'][feedback];
+      decodeLoops.push(`${decodeLoops.length?'elseif':'if'} mode==${mode} and feedback==${feedback} then for index=offset+1,offset+n do local e=v[index] local plain=${plain} v[index]=plain previous=${update} position=position+step end`);
+    }
+    const payloadMarker=fresh();
+    const initializer=`(function(${byteFn},${charFn},${joinFn},raise,unpackValues)
       local map={} local alphabet=${luaLiteral(alphabet)}
       for i=1,64 do map[${byteFn}(alphabet,i)]=i-1 end
       local function ${decoder}(s)
@@ -694,30 +740,30 @@ function obfuscateLua(source, supplied = {}) {
           local inv,key,step,previous,rev,mode,feedback=v[at],v[at+1],v[at+2],v[at+3],v[at+4],v[at+5],v[at+6]
           if inv%2~=1 or rev>1 or mode>2 or feedback>2 then damaged() end
           if rev==1 then for i=1,(n-n%2)/2 do v[offset+i],v[offset+n-i+1]=v[offset+n-i+1],v[offset+i] end end
-          for i=1,n do
-            local e=v[offset+i] local plain
-            if mode==0 then plain=(e*inv-key-i*step-previous)%256
-            elseif mode==1 then plain=((e-key-i*step-previous)*inv)%256
-            else plain=((e-previous)*inv-key-i*step)%256 end
-            v[offset+i]=plain
-            if feedback==0 then previous=e elseif feedback==1 then previous=plain else previous=(plain+e)%256 end
-          end
+          local position=step
+          ${decodeLoops.join(' ')} end
         end
         local o={} local sum,weighted=1,0
-        for i=1,n do local value=v[offset+i] o[i]=${charFn}(value) sum=(sum+value)%65521 weighted=(weighted+sum)%65521 end
+        for i=1,n do local value=v[offset+i] sum=(sum+value)%65521 weighted=(weighted+sum)%65521 end
         if sum~=v[2]+v[3]*256 or weighted~=v[4]+v[5]*256 then damaged() end
+        for first=1,n,96 do local last=first+95 if last>n then last=n end o[#o+1]=${charFn}(unpackValues(v,offset+first,offset+last)) end
         return ${joinFn}(o)
       end
-      return {${shuffled.map(item=>item.entry).join(',')}}
-    end)(string.byte,string.char,table.concat,error)`;
+      return {${payloadMarker}(${decoder})}
+    end)(string.byte,string.char,table.concat,error,table.unpack or unpack)`;
     // Reuse the lexical renamer for generated helpers. Strings are disabled
     // in this pass, so it cannot recursively generate another decoder.
-    const helper=obfuscateLua('return '+initializer,{version:options.version,rename:true,strings:false,numbers:false,oneline:false,junk:false,paddingKB:0,watermarks:false,layers:1}).code.slice(7);
-    output=`local ${poolName}=${helper}\n`+output;
+    let helper=obfuscateLua('return '+initializer,{version:options.version,rename:true,strings:false,numbers:false,oneline:false,junk:false,paddingKB:0,watermarks:false,layers:1}).code.slice(7);
+    const marker=new RegExp(payloadMarker+'\\(([A-Za-z_][A-Za-z_0-9]*)\\)');
+    const renamedDecoder=marker.exec(helper)?.[1];
+    if(!renamedDecoder)throw new Error('Could not assemble the encoded constant pool.');
+    helper=helper.replace(marker,()=>shuffled.map(item=>renamedDecoder+item.entry.slice(decoder.length)).join(','));
+    const rootAliases=hotAliases.has(ast)?aliasDeclaration(hotAliases.get(ast)).replace(new RegExp(poolName+'\\[(\\d+)\\]','g'),(_,index)=>`${poolName}[${newIndex[Number(index)]}]`):'';
+    output=`local ${poolName}=${helper}\n`+rootAliases+output;
   }
   if(stateName)output=`local ${stateName}={}\n`+output;
   let junk=0;
-  if(options.junk&&options.junkCount){const blocks=[];for(let i=0;i<options.junkCount;i++){const name=fresh(),value=100+crypto.getRandomValues(new Uint16Array(1))[0]%900;blocks.push(`do local ${name}=${value};${name}=${name}+1 end`);junk++;}output=blocks.join('\n')+'\n'+output;}
+  if(options.junk&&options.junkCount){const blocks=[];for(let i=0;i<options.junkCount;i++){const name=fresh(),value=100+randomWord()%900;blocks.push(`do local ${name}=${value};${name}=${name}+1 end`);junk++;}output=blocks.join('\n')+'\n'+output;}
   if(options.oneline)output=scanLua(output).map(token=>token.kind==='string'&&/[\r\n]/.test(token.value)?'"'+literalBytes(token.value).map(byte=>'\\'+String(byte).padStart(3,'0')).join('')+'"':token.value).join(' ');
   const paddingBytes=options.paddingKB*1024;
   if(paddingBytes){
@@ -735,12 +781,12 @@ function obfuscateLua(source, supplied = {}) {
     outputLimits=checkCompilerLimits(parse(output),options.version);
     if(isLuau&&outputLimits.lexicalMaxLocals>200)throw new Error('A generated function exceeds the strict 200-local limit. Split its setup into smaller blocks.');
   }catch(error){throw new Error('Output validation failed: '+error.message);}
-  return {code:output,renamed,junk,encoded,maskedNumbers,packedLocals:spilled.size,normalizedFunctions,strictLocals:outputLimits.lexicalMaxLocals,uniqueStrings:pool.length,layers:pool.length?options.layers:0,paddingBytes,watermarks:options.watermarks?WATERMARKS.length:0};
+  return {code:output,buildMs:Date.now()-buildStarted,renamed,junk,encoded,maskedNumbers,fast:options.fast,fastAccesses,cachedLoopConstants:[...hotAliases.values()].reduce((sum,aliases)=>sum+aliases.size,0),packedLocals:spilled.size,normalizedFunctions,strictLocals:outputLimits.lexicalMaxLocals,uniqueStrings:pool.length,layers:pool.length?options.layers:0,paddingBytes,watermarks:options.watermarks?WATERMARKS.length:0};
 }
 
 const $=id=>document.getElementById(id);
 const sourceBox=$('source'), errorBox=$('error'), statusBox=$('status');
-const settingIds=['version','layers','junk-count','symbol-padding','font-size','rename','strings','numbers','removeComments','oneline','junk','watermarks'];
+const settingIds=['version','layers','junk-count','symbol-padding','font-size','rename','strings','numbers','fast','removeComments','oneline','junk','watermarks'];
 const presetIds=['preset-compact','preset-balanced','preset-large'];
 const maxInput=1024*1024;
 let activeWorker=null, activeTimer=null, activeURL=null, draftTimer=null, sourceLineCount=1, fileName='Untitled.lua';
@@ -755,7 +801,7 @@ const renderGutter=()=>{
 };
 const setCursor=()=>{const position=sourceBox.selectionStart||0,before=sourceBox.value.slice(0,position);$('cursor-stat').textContent='Ln '+(before.split('\n').length).toLocaleString()+', Col '+(position-before.lastIndexOf('\n')).toLocaleString();};
 const setStat=()=>{sourceLineCount=sourceBox.value.split('\n').length;$('input-stat').textContent=sourceLineCount.toLocaleString()+(sourceLineCount===1?' line':' lines')+' · '+sourceBox.value.length.toLocaleString()+' characters';setCursor();renderGutter();};
-const settings=()=>({version:$('version').value,layers:Number($('layers').value),junkCount:Number($('junk-count').value),paddingKB:Number($('symbol-padding').value),fontSize:Number($('font-size').value),rename:$('rename').checked,strings:$('strings').checked,numbers:$('numbers').checked,removeComments:$('removeComments').checked,oneline:$('oneline').checked,junk:$('junk').checked,watermarks:$('watermarks').checked});
+const settings=()=>({version:$('version').value,layers:Number($('layers').value),junkCount:Number($('junk-count').value),paddingKB:Number($('symbol-padding').value),fontSize:Number($('font-size').value),rename:$('rename').checked,strings:$('strings').checked,numbers:$('numbers').checked,fast:$('fast').checked,removeComments:$('removeComments').checked,oneline:$('oneline').checked,junk:$('junk').checked,watermarks:$('watermarks').checked});
 const syncControls=()=>{
   for(const [id,label]of [['layers','layers'],['junk-count','blocks'],['symbol-padding','KB'],['font-size','px']]){
     const input=$(id),value=Number(input.value),progress=(value-Number(input.min))/(Number(input.max)-Number(input.min))*100;
@@ -808,11 +854,13 @@ sourceBox.addEventListener('keydown',event=>{
   if(event.key==='Tab'){event.preventDefault();sourceBox.setRangeText('  ',sourceBox.selectionStart,sourceBox.selectionEnd,'end');edited();}
 });
 for(const id of settingIds)$(id).addEventListener('change',()=>{syncControls();saveDraft();});
-for(const [id,layers,junk,padding]of [['preset-compact',1,4,0],['preset-balanced',3,16,64],['preset-large',4,64,512]])$(id).onclick=()=>{
+for(const [id,layers,junk,padding]of [['preset-compact',1,0,0],['preset-balanced',3,16,64],['preset-large',4,64,512]])$(id).onclick=()=>{
   $('layers').value=String(layers);$('junk-count').value=String(junk);$('symbol-padding').value=String(padding);
   for(const option of ['strings','numbers','rename','removeComments','oneline','junk'])$(option).checked=true;
+  $('fast').checked=id!=='preset-large';$('numbers').checked=id!=='preset-compact';$('junk').checked=junk>0;
   syncControls();saveDraft();statusBox.textContent='Preset applied. Ready to process.';
 };
+$('preset-compact').title='One layer, no junk or padding, integer masks off, fast field access';
 for(const id of ['layers','junk-count','symbol-padding','font-size'])$(id).addEventListener('input',()=>{syncControls();clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,350);});
 $('example').onclick=()=>{sourceBox.value='local greeting = "Hello"\nlocal function say(name)\n  local message = greeting .. ", " .. name\n  print(message)\nend\nsay("world")';setFileName('Example.lua');edited();};
 $('open-file').onclick=()=>{$('file').click();};
@@ -855,7 +903,7 @@ $('run').onclick=()=>{
       const result=message.result;
       if(!result||typeof result.code!=='string'){fail('The processor returned an invalid result.');return;}
       stopWorker();statusBox.textContent='Output is ready.';
-      const item={schema:2,output:result.code,renamed:result.renamed,junk:result.junk,encoded:result.encoded,maskedNumbers:result.maskedNumbers,packedLocals:result.packedLocals,normalizedFunctions:result.normalizedFunctions,strictLocals:result.strictLocals,uniqueStrings:result.uniqueStrings,layers:result.layers,paddingBytes:result.paddingBytes,watermarks:result.watermarks,version:settings().version};
+      const item={schema:2,output:result.code,buildMs:result.buildMs,fast:result.fast,fastAccesses:result.fastAccesses,cachedLoopConstants:result.cachedLoopConstants,renamed:result.renamed,junk:result.junk,encoded:result.encoded,maskedNumbers:result.maskedNumbers,packedLocals:result.packedLocals,normalizedFunctions:result.normalizedFunctions,strictLocals:result.strictLocals,uniqueStrings:result.uniqueStrings,layers:result.layers,paddingBytes:result.paddingBytes,watermarks:result.watermarks,version:settings().version};
       try{
         sessionStorage.removeItem('luaveil-result');
         sessionStorage.setItem('luaveil-result',JSON.stringify(item));
